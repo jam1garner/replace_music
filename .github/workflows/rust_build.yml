@@ -26,7 +26,7 @@ jobs:
          token: ${{ secrets.GITHUB_TOKEN }}
          name: master
          code: master
-         body: Build of skyline-rs-template from master.
+         body: Build of replace_music from master.
          prerelease: true
          recreate: true
          assets: ./target/aarch64-skyline-switch/release/${{env.PLUGIN_NAME}}:${{env.PLUGIN_NAME}}:application/octet-stream
