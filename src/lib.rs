@@ -70,8 +70,10 @@ pub fn random_media_select(directory: &str) -> io::Result<String>{
         let entry = entry?;
         let filename = entry.path();
         let real_path = format!("{}/{}", directory, filename.display());
-        media_files.insert(media_count, real_path);
-        media_count += 1;
+        if !Path::new(&real_path).is_dir() {
+            media_files.insert(media_count, real_path);
+            media_count += 1;
+        }
     }
 
     if media_count <= 0 {
