@@ -6,6 +6,8 @@ use skyline::libc::{c_void, c_char};
 use skyline::logging::hex_dump_ptr;
 use smash::hash40;
 use std::{ptr, fs, io, path::{Path, PathBuf}, collections::HashMap};
+use rand::Rng;
+use std::io::{Error, ErrorKind};
 
 struct StreamFiles(pub HashMap<u64, PathBuf>);
 
@@ -27,7 +29,11 @@ impl StreamFiles {
                 let filename = entry.path();
                 let real_path = format!("{}/{}", dir.display(), filename.display());
                 let path = Path::new(&real_path);
-                if path.is_dir() {
+                if path.is_dir() &&  path.display().to_string().contains("."){
+                    let new_path = format!("stream:{}", &path.display().to_string()[STREAM_DIR.len()..]);
+                    let hash = hash40(&new_path);
+                    self.0.insert(hash, Path::new(&path.display().to_string()).to_path_buf());
+                }else if path.is_dir(){
                     self.visit_dir(&path)?;
                 } else {
                     self.visit_file(path);
@@ -40,8 +46,10 @@ impl StreamFiles {
 
     fn visit_file(&mut self, path: &Path) {
         let game_path = format!("stream:{}", &path.display().to_string()[STREAM_DIR.len()..]);
-        let hash = hash40(&game_path);
-        self.0.insert(hash, path.to_owned());
+        if !format!("{:?}", &path.file_name().unwrap()).contains("._") {
+            let hash = hash40(&game_path);
+            self.0.insert(hash, path.to_owned());
+        }
     }
 }
 
@@ -51,20 +59,69 @@ lazy_static::lazy_static!{
 
 static mut LOOKUP_STREAM_HASH_OFFSET: usize = 0x31bf2e0; // default = 7.0.0 offset
 
+pub fn random_media_select(directory: &str) -> io::Result<String>{
+    let mut rng = rand::thread_rng();
+
+    let mut media_files = HashMap::new();
+
+    let mut media_count = 0;
+    
+    for entry in fs::read_dir(Path::new(directory))? {
+        let entry = entry?;
+        let filename = entry.path();
+        let real_path = format!("{}/{}", directory, filename.display());
+        media_files.insert(media_count, real_path);
+        media_count += 1;
+    }
+
+    if media_count <= 0 {
+        return Err(Error::new(ErrorKind::Other, "No Files Found!"))
+    }
+    
+    let random_result = rng.gen_range(0, media_count);
+
+    Ok(media_files.get(&random_result).unwrap().to_string())
+}
+
 // (char *out_path,void *loadedArc,undefined8 *size_out,undefined8 *offset_out, ulonglong hash)
 #[hook(offset = LOOKUP_STREAM_HASH_OFFSET)]
 fn lookup_by_stream_hash(
     out_path: *mut c_char, loaded_arc: *const c_void, size_out: *mut u64, offset_out: *mut u64, hash: u64
 ) {
     if let Some(path) = STREAM_FILES.0.get(&hash) {
-        let file = fs::File::open(&path).unwrap();
-        let metadata = file.metadata().unwrap();
-        let size = metadata.len() as u64;
+        let file;
+        let metadata;
+        let size;
+        let random_selection;
+
+        let directory = path.display().to_string();
+        
+        if  Path::new(&directory).is_dir() {
+
+            match random_media_select(&directory){
+                Ok(pass) => random_selection = pass,
+                Err(err) => {
+                    println!("{}", err);
+                    original!()(out_path, loaded_arc, size_out, offset_out, hash);
+                    return;
+                }
+            };
+
+            file = fs::File::open(&random_selection).unwrap();
+            metadata = file.metadata().unwrap();
+            size = metadata.len() as u64;
+
+        } else{
+            random_selection = path.to_str().expect("Paths must be valid unicode").to_string();
+            file = fs::File::open(&random_selection).unwrap();
+            metadata = file.metadata().unwrap();
+            size = metadata.len() as u64;
+        }
 
         unsafe {
             *size_out = size;
             *offset_out = 0;
-            let string = path.to_str().expect("Paths must be valid unicode");
+            let string = random_selection;
             println!("Loading '{}'...", string);
             let bytes = string.as_bytes();
             ptr::copy_nonoverlapping(
