@@ -1,4 +1,5 @@
 #![feature(proc_macro_hygiene)]
+#![feature(str_strip)]
 
 use skyline::{hook, install_hook};
 use skyline::hooks::{getRegionAddress, Region};
@@ -45,7 +46,11 @@ impl StreamFiles {
     }
 
     fn visit_file(&mut self, path: &Path) {
-        let game_path = format!("stream:{}", &path.display().to_string()[STREAM_DIR.len()..]);
+        let mut game_path = format!("stream:{}", &path.display().to_string()[STREAM_DIR.len()..]);
+        match game_path.strip_suffix("mp4") {
+            Some(x) => game_path = format!("{}{}", x, "webm"),
+            None => (),
+        }
         if !format!("{:?}", &path.file_name().unwrap()).contains("._") {
             let hash = hash40(&game_path);
             self.0.insert(hash, path.to_owned());
